@@ -1,0 +1,10 @@
+numpy
+pandas
+yfinance
+pandas-datareader
+fredapi
+requests-cache
+pyarrow
+numpy-financial
+scipy
+matplotlib

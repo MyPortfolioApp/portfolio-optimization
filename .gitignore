@@ -1,0 +1,28 @@
+# Python virtualenvs and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Test / cache
+.pytest_cache/
+.cache/
+.venv/
+data_cache/
+__pycache__/
+*.ipynb_checkpoints/
