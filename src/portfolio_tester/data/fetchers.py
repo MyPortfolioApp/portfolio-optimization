@@ -18,15 +18,30 @@ def log(msg: str):
 def fetch_prices_monthly(tickers, start=None, end=None):
     """Download daily auto-adjusted prices from Yahoo and resample to month-end."""
 
+    if isinstance(tickers, str):
+        tickers = [tickers]
+
+    key = f"{','.join(tickers)}|{start}|{end}"
+    path = key_path("prices", key)
+    cached = _cache_read(path)
+    if cached is not None:
+        return cached
+
     log(f"Downloading from Yahoo Finance: {tickers}")
-    data = yf.download(
-        tickers,
+    download_kwargs = dict(
+        tickers=tickers,
         auto_adjust=True,
         progress=False,
         interval="1d",
         group_by="column",
-        period="max",
     )
+    if start is not None:
+        download_kwargs["start"] = pd.to_datetime(start)
+    if end is not None:
+        download_kwargs["end"] = pd.to_datetime(end)
+    if start is None and end is None:
+        download_kwargs["period"] = "max"
+    data = yf.download(**download_kwargs)
 
     def extract_close_frame(data, tickers):
         import pandas as pd
@@ -53,6 +68,7 @@ def fetch_prices_monthly(tickers, start=None, end=None):
         raise RuntimeError("None of the requested tickers returned price data.")
     px_daily = px_daily[present]
     monthly = px_daily.resample("ME").last().dropna(how="all")
+    _cache_write(monthly, path)
     return monthly
  
 
@@ -130,27 +146,64 @@ def fetch_fred_series(series_id, start=None, end=None):
 
 def prep_returns_and_macro(prices_m, start=None, end=None):
     """
-    - Trim to dates
-    - Force common overlap
-    - Compute monthly simple returns
-    - Build monthly inflation (CPIAUCSL) and monthly risk-free (TB3MS converted)
+    - Determine effective start from first fully populated price row + optional override
+    - Fill interior gaps with neighbor averages to keep uninterrupted history
+    - Compute returns and macro series aligned to the trimmed window
     Returns: (returns_df, inflation_series, riskfree_series)
     """
-    prices_m = prices_m.sort_index()
-    if start: prices_m = prices_m[prices_m.index >= pd.to_datetime(start)]
-    if end:   prices_m = prices_m[prices_m.index <= pd.to_datetime(end)]
-    prices_m = prices_m.dropna(axis=1, how="all").dropna(how="any")
-    rets_m = prices_m.pct_change().dropna()
 
-    cpi = fetch_fred_series("CPIAUCSL", start=rets_m.index.min(), end=rets_m.index.max())
-    tb3 = fetch_fred_series("TB3MS", start=rets_m.index.min(), end=rets_m.index.max())
+    def _fill_neighbor_average(df: pd.DataFrame) -> pd.DataFrame:
+        filled = df.copy()
+        for column in filled.columns:
+            series = filled[column]
+            missing_idx = series[series.isna()].index
+            for idx in missing_idx:
+                loc = series.index.get_loc(idx)
+                prev_vals = series.iloc[:loc].dropna()
+                next_vals = series.iloc[loc + 1 :].dropna()
+                if not prev_vals.empty and not next_vals.empty:
+                    filled.at[idx, column] = (prev_vals.iloc[-1] + next_vals.iloc[0]) / 2.0
+                elif not prev_vals.empty:
+                    filled.at[idx, column] = prev_vals.iloc[-1]
+                elif not next_vals.empty:
+                    filled.at[idx, column] = next_vals.iloc[0]
+        return filled
 
-    cpi = cpi.reindex(rets_m.index).ffill()
-    # Fix first warning by explicitly setting fill_method=None
-    infl_m = cpi["CPIAUCSL"].pct_change(fill_method=None).reindex(rets_m.index).fillna(0.0)
+    prices_m = prices_m.sort_index().dropna(axis=1, how="all")
 
-    rf_m = ((1.0 + (tb3.reindex(rets_m.index)["TB3MS"] / 100.0)) ** (1/12.0) - 1.0)
-    # Fix second warning by using ffill() method instead of fillna(method="ffill")
-    rf_m = rf_m.ffill().fillna(0.0)
+    complete_rows = prices_m.dropna(how="any")
+    if complete_rows.empty:
+        raise ValueError("No overlapping price data available across tickers.")
+    feasible_start = complete_rows.index.min()
 
-    return rets_m, infl_m.rename("inflation_m"), rf_m.rename("rf_m")
+    start_ts = pd.to_datetime(start) if start is not None else None
+    end_ts = pd.to_datetime(end) if end is not None else None
+    effective_start = feasible_start if start_ts is None else max(feasible_start, start_ts)
+
+    if end_ts is not None and end_ts < effective_start:
+        raise ValueError("end precedes the earliest feasible start date.")
+
+    price_window = prices_m.loc[prices_m.index >= effective_start]
+    if end_ts is not None:
+        price_window = price_window.loc[price_window.index <= end_ts]
+
+    price_window = _fill_neighbor_average(price_window).dropna(how="any")
+    if price_window.shape[0] < 2:
+        raise ValueError("Insufficient price history after gap filling to compute returns.")
+
+    rets_m = price_window.pct_change().dropna()
+    if rets_m.empty:
+        raise ValueError("Insufficient observations to compute monthly returns.")
+
+    macro_start, macro_end = rets_m.index.min(), rets_m.index.max()
+
+    cpi = fetch_fred_series("CPIAUCSL", start=macro_start, end=macro_end).reindex(rets_m.index)
+    cpi = _fill_neighbor_average(cpi)
+    infl_m = cpi["CPIAUCSL"].pct_change(fill_method=None).fillna(0.0)
+
+    tb3 = fetch_fred_series("TB3MS", start=macro_start, end=macro_end).reindex(rets_m.index)
+    tb3 = _fill_neighbor_average(tb3)
+    rf_m = ((1.0 + (tb3["TB3MS"] / 100.0)) ** (1 / 12.0) - 1.0).ffill().fillna(0.0)
+
+    return rets_m, infl_m, rf_m
+
