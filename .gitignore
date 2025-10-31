@@ -26,3 +26,6 @@ pip-wheel-metadata/
 data_cache/
 __pycache__/
 *.ipynb_checkpoints/
+
+# Generated figures
+figures/

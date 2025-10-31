@@ -2,10 +2,17 @@ from portfolio_tester.config import Asset, Portfolio, SamplerConfig, SimConfig, 
 from portfolio_tester.data.fetchers import fetch_prices_monthly, prep_returns_and_macro
 from portfolio_tester.sampling.bootstrap import ReturnSampler
 from portfolio_tester.engine.simulator import MonteCarloSimulator
-from portfolio_tester.analytics.metrics import cagr, twrr_annualized, max_drawdown
+from portfolio_tester.analytics.metrics import cagr, twrr_annualized, max_drawdown, sharpe_sortino
+from portfolio_tester.analytics.risk import efficient_frontier, portfolio_annual_stats
+from portfolio_tester.viz.charts import plot_allocation_donut, plot_efficient_frontier, plot_end_balance_hist, plot_percentile_bands, plot_survival_curve
+
 import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
 
 def main():
+    figs_dir = Path("figures"); figs_dir.mkdir(exist_ok=True, parents=True)
+
     # 1) Portfolio (MVP)
     p = Portfolio([
         Asset("VTI","Vanguard Total Stock Market ETF",0.30),
@@ -16,11 +23,11 @@ def main():
     ])
 
     # 2) Configs
-    sim_cfg = SimConfig(horizon_months=30*12, n_sims=100, starting_balance=1_000_000)  # start with 100 sims
+    sim_cfg = SimConfig(horizon_months=30*12, n_sims=100, starting_balance=1_000_000.0)
     sam_cfg = SamplerConfig(mode="single_year", block_years=1, seed=42)
 
+    # Withdraw $4,000/mo starting in 1 year, for 30 years, inflation-indexed (real)
     goals = [
-        # Withdraw $4,000/mo starting in 1 year, for 30 years, inflation-indexed (real)
         Goal("Retirement Withdrawals", amount=-4000, start_month=12, frequency=12, repeats=30*12, real=True),
     ]
 
@@ -37,24 +44,48 @@ def main():
     sim = MonteCarloSimulator(weights=p.weights_vector(), starting_balance=sim_cfg.starting_balance, rebalance_every_months=sim_cfg.rebalance_every_months)
     out = sim.run_with_cashflows(R_paths, CPI_paths, goals)
 
-    # 6) Simple summary
-    surv = (out["failure_month"] == -1).mean()
+    # 6) Metrics
+    surv_rate = (out["failure_month"] == -1).mean()
     cagr_vals = cagr(out["balances"], sim_cfg.horizon_months)
     twrr_vals = twrr_annualized(out["twrr_monthly"])
     mdd_vals = max_drawdown(out["balances"])
+    #sharpe_vals, sortino_vals = sharpe_sortino(out["twrr_monthly"], rf_m) This should be calculated on past metrics not simulated paths
 
     def pct(x): return f"{100*x:.1f}%"
-    print("=== Monte Carlo Summary (100 sims) ===")
-    print(f"Survival rate: {pct(surv)}")
+    print("=== Monte Carlo Summary ===")
+    print(f"Survival rate: {pct(surv_rate)}")
     print(f"End balance (nominal) median: ${np.median(out['balances'][:,-1]):,.0f}")
     print(f"CAGR median: {np.nanmedian(cagr_vals):.2%}")
     print(f"TWRR median: {np.nanmedian(twrr_vals):.2%}")
+    #print(f"Sharpe (median): {np.nanmedian(sharpe_vals):.2f} | Sortino (median): {np.nanmedian(sortino_vals):.2f}")
     print(f"Max Drawdown median: {np.median(mdd_vals):.1%}")
     print("Percentiles (10/50/90) - End Balance:",
           [f"${v:,.0f}" for v in np.percentile(out['balances'][:,-1], [10,50,90])])
 
-    
+    # 7) Figures
+    labels = [a.name for a in p.assets]
+    weights = p.weights_vector()
+    fig, ax = plot_allocation_donut(labels, weights, title="MVP Portfolio Allocation !")
+    fig.savefig(figs_dir / "allocation_donut.png", bbox_inches="tight"); plt.close(fig)
 
+    W, rets, risks, names = efficient_frontier(rets_m)
+    pr, pv = portfolio_annual_stats(weights, rets_m)
+    fig, ax = plot_efficient_frontier(risks, rets, port_pt=(pv, pr), title="Efficient Frontier (historical, long-only)")
+    fig.savefig(figs_dir / "efficient_frontier.png", bbox_inches="tight"); plt.close(fig)
+
+    fig, ax = plot_percentile_bands(out["balances"], title="Nominal Balance Percentile Bands")
+    fig.savefig(figs_dir / "bands_nominal.png", bbox_inches="tight"); plt.close(fig)
+
+    fig, ax = plot_percentile_bands(out["real_balances"], title="Real (CPI-adjusted) Balance Percentile Bands")
+    fig.savefig(figs_dir / "bands_real.png", bbox_inches="tight"); plt.close(fig)
+
+    fig, ax = plot_end_balance_hist(out["balances"][:,-1], title="Ending Balance (Nominal)")
+    fig.savefig(figs_dir / "end_balance_hist.png", bbox_inches="tight"); plt.close(fig)
+
+    fig, ax = plot_survival_curve(out["failure_month"], sim_cfg.horizon_months, title="Survival Curve (No Failure by Month)")
+    fig.savefig(figs_dir / "survival_curve.png", bbox_inches="tight"); plt.close(fig)
+
+    print(f"Saved figures to: {figs_dir.resolve()}")
 
 if __name__ == "__main__":
     main()
