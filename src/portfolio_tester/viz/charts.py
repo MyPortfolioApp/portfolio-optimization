@@ -10,17 +10,67 @@ def _ensure_ax(ax=None):
     return fig, ax
 
 def plot_allocation_donut(labels: Sequence[str], weights: Sequence[float], ax=None, title="Portfolio Allocation"):
+    """Donut chart showing allocation percentages on wedges and in the legend."""
+    import numpy as np
+
     fig, ax = _ensure_ax(ax)
-    wedges, _ = ax.pie(weights, startangle=90, wedgeprops=dict(width=0.4))
-    ax.legend(wedges, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+    weights = np.asarray(list(weights), dtype=float)
+    wnorm = weights / weights.sum() if weights.sum() != 0 else weights
+
+    # Show % labels on wedges; hide very small ones to avoid clutter
+    def _autopct(pct, threshold=2.0):
+        return f"{pct:.1f}%" if pct >= threshold else ""
+
+    wedges, _, _  = ax.pie(
+        weights,
+        startangle=90,
+        wedgeprops=dict(width=0.4),
+        autopct=lambda pct: _autopct(pct),
+        pctdistance=0.8,  # place the % text inside the ring
+    )
+
+    # Legend also shows percentages, normalized to sum=100%
+    legend_labels = [f"{lab} — {p*100:.1f}%" for lab, p in zip(labels, wnorm)]
+    ax.legend(wedges, legend_labels, loc="center left", bbox_to_anchor=(1, 0.5))
     ax.set_title(title)
     return fig, ax
 
-def plot_efficient_frontier(risks: np.ndarray, rets: np.ndarray, port_pt: Tuple[float,float]=None, ax=None, title="Efficient Frontier"):
+def plot_efficient_frontier(
+    risks: np.ndarray,
+    rets: np.ndarray,
+    port_pt: Tuple[float, float] = None,
+    asset_points: Tuple[np.ndarray, np.ndarray, Sequence[str]] = None,
+    msr_pt: Tuple[float, float] = None,
+    rf: float = None,
+    port_label: str = "Provided Portfolio",
+    ax=None,
+    title: str = "Efficient Frontier"
+):
     fig, ax = _ensure_ax(ax)
-    ax.plot(risks, rets, lw=2, label="Frontier")
+
+    # Efficient (upper) frontier
+    ax.plot(risks, rets, lw=2, label="Efficient frontier")
+
+    # Single-asset markers + labels
+    if asset_points is not None:
+        a_risk, a_ret, a_labels = asset_points
+        ax.scatter(a_risk, a_ret, s=60)
+        for x, y, lab in zip(a_risk, a_ret, a_labels):
+            ax.annotate(lab, xy=(x, y), xytext=(6, 6), textcoords="offset points")
+
+    # Provided portfolio
     if port_pt is not None:
-        ax.scatter([port_pt[0]], [port_pt[1]], s=60, marker="o", label="Current")
+        ax.scatter([port_pt[0]], [port_pt[1]], s=60, marker="D", label=port_label)
+        ax.annotate(port_label, xy=port_pt, xytext=(8, 8), textcoords="offset points")
+
+    # Max Sharpe portfolio (star) + Capital Market Line
+    if msr_pt is not None:
+        ax.scatter([msr_pt[0]], [msr_pt[1]], s=160, marker="*", label="Max Sharpe")
+        ax.annotate("Max Sharpe", xy=msr_pt, xytext=(8, 8), textcoords="offset points")
+        if rf is not None:
+            # CML from (0, rf) to the MSR point
+            ax.plot([0.0, msr_pt[0]], [rf, msr_pt[1]], linestyle="--", linewidth=1.5, label="Capital Market Line")
+
     ax.set_xlabel("Annualized Volatility")
     ax.set_ylabel("Annualized Return")
     ax.grid(True, alpha=0.3)
