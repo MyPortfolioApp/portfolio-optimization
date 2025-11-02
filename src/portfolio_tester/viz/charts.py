@@ -11,7 +11,6 @@ def _ensure_ax(ax=None):
 
 def plot_allocation_donut(labels: Sequence[str], weights: Sequence[float], ax=None, title="Portfolio Allocation"):
     """Donut chart showing allocation percentages on wedges and in the legend."""
-    import numpy as np
 
     fig, ax = _ensure_ax(ax)
     weights = np.asarray(list(weights), dtype=float)
@@ -78,6 +77,77 @@ def plot_efficient_frontier(
     ax.set_title(title)
     return fig, ax
 
+
+def plot_frontier_transition_map(
+    weights: np.ndarray,          # (n_pts, n_assets) from efficient_frontier(...)
+    risks: np.ndarray,            # (n_pts,)
+    asset_labels: Sequence[str],
+    port_risk: float | None = None,   # <-- NEW
+    msr_risk: float | None = None,    # <-- NEW
+    ax=None,
+    title: str = "Efficient Frontier Transition Map"
+):
+    """
+    Stacked area (stackplot) of long-only frontier weights vs. portfolio volatility.
+    Shows how the optimal allocation transitions across the efficient frontier.
+    Optionally draws vertical lines at the Provided Portfolio risk and Max Sharpe risk.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter
+
+    fig, ax = _ensure_ax(ax)
+
+    # 1) sort by risk (x-axis)
+    order = np.argsort(risks)
+    x = risks[order].astype(float)
+
+    # 2) clip tiny negatives from numerical noise and re-normalize to 1
+    W = np.clip(weights[order, :].astype(float), 0.0, None)
+    row_sums = W.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0] = 1.0
+    W = W / row_sums
+
+    # 3) stackplot expects one series per asset; transpose and convert to %
+    Y = (W.T) * 100.0
+
+    # 4) draw the stacked area
+    ax.stackplot(x, Y, labels=asset_labels, alpha=0.5)
+
+    # 5) top border (cosmetic)
+    ax.plot([x.min(), x.max()], [100.0, 100.0], linewidth=1, alpha=0.4)
+
+    # 6) optional vertical lines + tiny labels above the stack
+    if port_risk is not None:
+        ax.axvline(port_risk, color="k", linestyle="--", linewidth=1.5, alpha=0.9)
+        ax.annotate("Provided Portfolio", xy=(port_risk, 100),
+                    xytext=(0, 6), textcoords="offset points",
+                    ha="center", va="bottom")
+
+    if msr_risk is not None:
+        ax.axvline(msr_risk, color="k", linestyle=":", linewidth=1.8, alpha=0.9)
+        ax.annotate("Max Sharpe", xy=(msr_risk, 100),
+                    xytext=(0, 6), textcoords="offset points",
+                    ha="center", va="bottom")
+
+    # 7) labels, scales, legend
+    ax.set_xlabel("Standard Deviation")
+    ax.set_ylabel("Allocation")
+    ax.set_ylim(0, 100)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, pos: f"{v:.0f}%"))
+    ax.grid(True, alpha=0.2)
+    ax.set_title(title)
+
+    # legend below chart
+    ncol = min(len(asset_labels), 4)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=ncol, frameon=False)
+
+    return fig, ax
+
+
+
+
+
 def plot_end_balance_hist(end_balances, ax=None, title="End Balance Distribution"):
     fig, ax = _ensure_ax(ax)
     ax.hist(end_balances, bins=40)
@@ -115,3 +185,101 @@ def plot_survival_curve(failure_month: np.ndarray, T: int, ax=None, title="Survi
     ax.grid(True, alpha=0.3)
     ax.set_title(title)
     return fig, ax
+
+
+def plot_simulated_annual_cashflows(
+    nominal_median_by_year: np.ndarray,
+    real_median_by_year: np.ndarray,
+    ax=None,
+    title_top: str = "Simulated Annual Cashflows (nominal)",
+    title_bottom: str = "Simulated Annual Cashflows (in present dollars)",
+):
+    """
+    Draws two stacked bar charts:
+      - Top: median annual nominal cashflows (contribs+withdrawals) by year
+      - Bottom: median annual real (present-dollar) cashflows by year
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter
+
+    years = np.arange(1, len(nominal_median_by_year) + 1)
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 9), sharex=True)
+
+    # --- Top: nominal ---
+    axes[0].bar(years, nominal_median_by_year)
+    axes[0].axhline(0, color="black", linewidth=0.8)
+    axes[0].set_ylabel("Median Annual Cashflow ($)")
+    axes[0].yaxis.set_major_formatter(FuncFormatter(lambda v, pos: f"${v:,.0f}"))
+    axes[0].grid(True, axis="y", alpha=0.2)
+    axes[0].set_title(title_top)
+
+    # --- Bottom: present dollars ---
+    axes[1].bar(years, real_median_by_year)
+    axes[1].axhline(0, color="black", linewidth=0.8)
+    axes[1].set_xlabel("Year")
+    axes[1].set_ylabel("Median Annual Cashflow ($)")
+    axes[1].yaxis.set_major_formatter(FuncFormatter(lambda v, pos: f"${v:,.0f}"))
+    axes[1].grid(True, axis="y", alpha=0.2)
+    axes[1].set_title(title_bottom)
+
+    fig.tight_layout()
+    return fig, axes
+
+
+
+def plot_max_drawdown_histograms(
+    mdd_including: np.ndarray,
+    mdd_excluding: np.ndarray,
+    bins: int = 20,
+    clip_to_pct: int | None = 95,   # show middle 95% by default; set None to show all
+    title_incl: str = "Maximum Drawdown Histogram Including Cashflows",
+    title_excl: str = "Maximum Drawdown Histogram Excluding Cashflows",
+):
+    """
+    Draw two histograms stacked vertically:
+      - mdd_including: drawdowns computed on balance paths (includes cashflows)
+      - mdd_excluding: drawdowns computed on pre-cashflow TWRR index (excludes cashflows)
+    Inputs are decimals (e.g., -0.35 for -35%).
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter
+
+    def _clip(data):
+        if clip_to_pct is None:
+            return data, None, None
+        lo_q = (100 - clip_to_pct) / 2
+        hi_q = 100 - lo_q
+        lo, hi = np.percentile(data, [lo_q, hi_q])
+        mask = (data >= lo) & (data <= hi)
+        return data[mask], lo, hi
+
+    inc, lo_i, hi_i = _clip(mdd_including)
+    exc, lo_e, hi_e = _clip(mdd_excluding)
+
+    fig, axes = plt.subplots(2, 1, figsize=(12, 10), sharex=False)
+
+    # Top: including cashflows
+    axes[0].hist(inc, bins=bins, color="#ff2d2d")
+    axes[0].set_title(
+        f"{title_incl}" + (f" ({clip_to_pct}% of results)" if clip_to_pct else "")
+    )
+    axes[0].set_xlabel("Max. Drawdown")
+    axes[0].set_ylabel("Frequency")
+    axes[0].grid(True, axis="y", alpha=0.3)
+    axes[0].xaxis.set_major_formatter(FuncFormatter(lambda v, pos: f"{v:.1%}"))
+
+    # Bottom: excluding cashflows
+    axes[1].hist(exc, bins=bins, color="#ffa01e")
+    axes[1].set_title(
+        f"{title_excl}" + (f" ({clip_to_pct}% of results)" if clip_to_pct else "")
+    )
+    axes[1].set_xlabel("Max. Drawdown")
+    axes[1].set_ylabel("Frequency")
+    axes[1].grid(True, axis="y", alpha=0.3)
+    axes[1].xaxis.set_major_formatter(FuncFormatter(lambda v, pos: f"{v:.1%}"))
+
+    fig.tight_layout()
+    return fig, axes
