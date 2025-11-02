@@ -6,7 +6,8 @@ from portfolio_tester.engine.cashflows import annual_cashflow_medians
 from portfolio_tester.analytics.metrics import cagr, twrr_annualized, max_drawdown, sharpe_sortino
 from portfolio_tester.analytics.risk import efficient_frontier, portfolio_annual_stats, single_asset_stats, max_sharpe_portfolio, risk_free_annual
 from portfolio_tester.viz.charts import (plot_allocation_donut, plot_efficient_frontier, plot_end_balance_hist, plot_percentile_bands, 
-                                         plot_survival_curve, plot_frontier_transition_map, plot_simulated_annual_cashflows, plot_max_drawdown_histograms)
+                                         plot_survival_curve, plot_frontier_transition_map, plot_simulated_annual_cashflows, plot_max_drawdown_histograms,
+                                         plot_correlation_matrix, plot_returns_risk_table)
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -155,6 +156,33 @@ def main():
     )
     fig.savefig(figs_dir / "max_drawdown_histograms.png", bbox_inches="tight"); plt.close(fig)
 
+
+    rets_for_tables = rets_m.copy()
+    # Optional: include CPI as a column (lets you see how assets correlate with inflation)
+    #rets_for_tables["U.S. Consumer Price Index"] = infl_m.values
+    # Optional: pretty names instead of tickers
+    name_map = {a.ticker: a.name for a in p.assets}
+    asset_labels = [name_map.get(col, col) for col in rets_for_tables.columns]
+    period = f"{rets_for_tables.index[0]:%b %Y} to {rets_for_tables.index[-1]:%b %Y}"
+    subtitle = f"Statistics based on monthly returns from {period}."
+
+    # 1) Correlation Matrix
+    fig, _ = plot_correlation_matrix(
+        returns_m=rets_for_tables,
+        asset_labels=asset_labels,
+        title="Asset Correlation Matrix",
+        subtitle=subtitle
+    )
+    fig.savefig(figs_dir / "asset_correlation_matrix.png", bbox_inches="tight"); plt.close(fig)
+
+    # 2) Returns & Risk Table
+    fig, _ = plot_returns_risk_table(
+        returns_m=rets_for_tables,
+        asset_labels=asset_labels,
+        title="Asset Returns & Risk (Annualized)",
+        subtitle=subtitle
+    )
+    fig.savefig(figs_dir / "asset_returns_risk_table.png", bbox_inches="tight"); plt.close(fig)
 
     print(f"Saved figures to: {figs_dir.resolve()}")
 

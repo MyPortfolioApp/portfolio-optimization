@@ -1,6 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Sequence, Tuple
+from matplotlib import gridspec
+import matplotlib as mpl
+import pandas as pd
+
 
 def _ensure_ax(ax=None):
     if ax is None:
@@ -283,3 +287,86 @@ def plot_max_drawdown_histograms(
 
     fig.tight_layout()
     return fig, axes
+
+
+def plot_correlation_matrix(
+    returns_m,
+    asset_labels=None,              # list of labels matching returns_m.columns (defaults to columns)
+    title="Asset Correlation Matrix",
+    subtitle=None,                  # e.g., "Based on monthly returns from Jan 1972 to Dec 2024"
+    annotate=True                   # write correlation numbers inside cells
+):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    cols = list(returns_m.columns)
+    labels = asset_labels if asset_labels is not None else cols
+    corr = returns_m.corr().values
+    n = len(cols)
+
+    # auto-size: wider for more assets
+    fig_w = min(20, 5 + 0.8 * n)
+    fig_h = min(20, 4 + 0.6 * n)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    im = ax.imshow(corr, vmin=-1, vmax=1, cmap="RdBu_r")
+    ax.set_xticks(range(n)); ax.set_xticklabels(labels, rotation=45, ha="right")
+    ax.set_yticks(range(n)); ax.set_yticklabels(labels)
+    ax.set_title(title, fontsize=14)
+
+    if annotate:
+        for i in range(n):
+            for j in range(n):
+                ax.text(j, i, f"{corr[i, j]:.2f}", ha="center", va="center", fontsize=9, color="black")
+
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.ax.set_ylabel("Corr", rotation=270, va="bottom")
+
+    if subtitle:
+        fig.text(0.01, 0.01, subtitle, fontsize=10, color="#666666")
+
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    return fig, ax
+
+
+def plot_returns_risk_table(
+    returns_m,
+    asset_labels=None,              # list of labels matching returns_m.columns
+    title="Asset Returns & Risk (Annualized)",
+    subtitle=None
+):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from portfolio_tester.analytics.risk import asset_return_stats
+
+    cols = list(returns_m.columns)
+    labels = asset_labels if asset_labels is not None else cols
+
+    stats = asset_return_stats(returns_m).loc[cols]  # keep same order
+    # Format as percents for display
+    stats_fmt = stats.applymap(lambda x: f"{x:.2%}")
+    col_labels = ["CAGR", "Expected Annual Return", "Annualized Volatility"]
+    cell_text = stats_fmt[col_labels].values.tolist()
+
+    # Height scales with number of rows
+    fig_w = 10
+    fig_h = 2 + 0.45 * max(4, len(labels))
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.axis("off")
+    ax.set_title(title, fontsize=14, pad=12)
+
+    tbl = ax.table(
+        cellText=cell_text,
+        rowLabels=labels,
+        colLabels=col_labels,
+        loc="center"
+    )
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(10)
+    tbl.scale(1.2, 1.3)
+
+    if subtitle:
+        fig.text(0.01, 0.01, subtitle, fontsize=10, color="#666666")
+
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    return fig, ax

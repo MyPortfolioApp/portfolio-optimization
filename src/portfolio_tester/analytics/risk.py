@@ -2,6 +2,33 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 
+def asset_return_stats(returns_m):
+    """
+    returns_m: DataFrame of monthly simple returns, columns = assets.
+    Returns a DataFrame (index = assets) with:
+      - CAGR (geometric, annual)
+      - Expected Annual Return (annualized arithmetic mean)
+      - Annualized Volatility
+    """
+    import numpy as np
+    import pandas as pd
+
+    n = returns_m.shape[0] if len(returns_m) else 1
+    # CAGR via geometric compounding over the sample, then annualize
+    cagr = (1.0 + returns_m).prod() ** (12.0 / n) - 1.0
+    # Annualized arithmetic mean
+    exp_ann = (1.0 + returns_m.mean()) ** 12 - 1.0
+    # Annualized volatility
+    vol_ann = returns_m.std(ddof=1) * np.sqrt(12)
+
+    out = pd.DataFrame({
+        "CAGR": cagr,
+        "Expected Annual Return": exp_ann,
+        "Annualized Volatility": vol_ann,
+    })
+    return out
+
+
 def mean_cov_annual(returns_m: pd.DataFrame):
     mu_m = returns_m.mean()
     cov_m = returns_m.cov()
