@@ -25,15 +25,15 @@ class MonteCarloSimulator:
             cf_paths[s] = build_cashflow_vector(goals, T, infl_path=infl_paths[s])
 
         alloc = np.tile(self.w, (n_sims, 1)) * self.starting_balance
-        twrr_monthly = np.ones((n_sims, T), dtype=float)
+        twrr_monthly = np.zeros((n_sims, T), dtype=float)
 
         for t in range(T):
             # 1) returns
             alloc *= (1.0 + R_paths[:, t, :])
             port = alloc.sum(axis=1)
             # time-weighted monthly pre-cashflow return
-            twrr_monthly[:, t] = (port / np.maximum(balances[:, t], 1e-12)) - 1.0
-
+            # approximate monthly portfolio return: fixed weights dot monthly asset returns
+            twrr_monthly[:, t] = (R_paths[:, t, :] * self.w).sum(axis=1)
             # 2) cashflow (end of month)
             port_after_cf = port + cf_paths[:, t]
             failed_now = (port_after_cf < 0) & (failure_month == -1)
