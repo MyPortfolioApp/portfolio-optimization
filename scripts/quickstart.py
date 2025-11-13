@@ -39,13 +39,10 @@ def main():
         Goal("Retirement Withdrawals", amount=-4000, start_month=12, frequency=12, repeats=30*12, real=True),
     ]
 
-
     # 3) Data
     tickers = p.tickers()
     prices_m = fetch_prices_monthly(tickers)
     rets_m, infl_m, rf_m = prep_returns_and_macro(prices_m)
-
-
 
     # 4) Sample paths
     sampler = ReturnSampler(rets_m, infl_m)

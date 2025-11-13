@@ -370,3 +370,30 @@ def plot_returns_risk_table(
 
     fig.tight_layout(rect=[0, 0.03, 1, 0.95])
     return fig, ax
+
+
+def plot_survival_vs_vol(
+    frontier,
+    smoothed_rates: np.ndarray,
+    best_idx: int,
+    ax=None,
+    title: str = "Survival Rate Across Constrained Frontier",
+):
+    """Simple helper to visualize survival vs. volatility for the frontier."""
+    vols = np.array([fp.volatility for fp in frontier])
+    raw = np.array([fp.survival_rate for fp in frontier])
+    fig = None
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(9, 5))
+    ax.plot(vols, raw, marker="o", label="Raw survival")
+    if smoothed_rates is not None:
+        ax.plot(vols, smoothed_rates, linestyle="--", label="Smoothed survival")
+    best = frontier[best_idx]
+    ax.scatter([best.volatility], [best.survival_rate], s=180, marker="*", label="Best", zorder=5)
+    ax.set_xlabel("Annualized Volatility")
+    ax.set_ylabel("Survival Rate")
+    ax.set_ylim(0, 1.0)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    ax.set_title(title)
+    return fig, ax
