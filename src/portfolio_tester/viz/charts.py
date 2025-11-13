@@ -124,13 +124,13 @@ def plot_frontier_transition_map(
     # 6) optional vertical lines + tiny labels above the stack
     if port_risk is not None:
         ax.axvline(port_risk, color="k", linestyle="--", linewidth=1.5, alpha=0.9)
-        ax.annotate("Provided Portfolio", xy=(port_risk, 100),
+        ax.annotate("Provided Portfolio", xy=(port_risk, 75),
                     xytext=(0, 6), textcoords="offset points",
                     ha="center", va="bottom")
 
     if msr_risk is not None:
         ax.axvline(msr_risk, color="k", linestyle=":", linewidth=1.8, alpha=0.9)
-        ax.annotate("Max Sharpe", xy=(msr_risk, 100),
+        ax.annotate("Max Sharpe", xy=(msr_risk, 50),
                     xytext=(0, 6), textcoords="offset points",
                     ha="center", va="bottom")
 
@@ -393,6 +393,28 @@ def plot_survival_vs_vol(
     ax.set_xlabel("Annualized Volatility")
     ax.set_ylabel("Survival Rate")
     ax.set_ylim(0, 1.0)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    ax.set_title(title)
+    return fig, ax
+
+def plot_constrained_frontier(
+    frontier,
+    best_idx: int,
+    ax=None,
+    title: str = "Constrained Efficient Frontier (Mean-Variance)",
+):
+    """Plot expected return vs volatility for the constrained frontier."""
+    vols = np.array([fp.volatility for fp in frontier])
+    rets = np.array([fp.expected_return for fp in frontier])
+    fig = None
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(9, 5))
+    ax.plot(vols, rets, marker="o", label="Frontier")
+    best = frontier[best_idx]
+    ax.scatter([best.volatility], [best.expected_return], s=160, marker="*", label="Best survival", zorder=5)
+    ax.set_xlabel("Annualized Volatility")
+    ax.set_ylabel("Annualized Expected Return")
     ax.grid(True, alpha=0.3)
     ax.legend()
     ax.set_title(title)

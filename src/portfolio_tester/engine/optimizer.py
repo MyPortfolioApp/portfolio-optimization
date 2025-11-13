@@ -83,22 +83,66 @@ def _initial_weights(bounds: List[tuple[float, float]]) -> np.ndarray:
     return mids
 
 
+def _solve_min_variance_portfolio(
+    cov: np.ndarray,
+    bounds: List[tuple[float, float]],
+) -> np.ndarray | None:
+    """
+    Solve the classic global minimum-variance problem:
+        minimize w^T Cov w
+        subject to sum(w) = 1
+    """
+    cons = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
+    x0 = _initial_weights(bounds)
+    res = minimize(lambda w: w @ cov @ w, x0, bounds=bounds, constraints=cons)
+    if not res.success:
+        return None
+    return res.x
+
+
+def _solve_max_variance_portfolio(
+    cov: np.ndarray,
+    bounds: List[tuple[float, float]],
+) -> np.ndarray | None:
+    """
+    Solve for the highest-volatility portfolio allowed by the box constraints:
+        maximize w^T Cov w
+        subject to sum(w) = 1
+    """
+    cons = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
+    x0 = _initial_weights(bounds)
+    res = minimize(lambda w: -(w @ cov @ w), x0, bounds=bounds, constraints=cons)
+    if not res.success:
+        return None
+    return res.x
+
+
 def _solve_portfolio(
     cov: np.ndarray,
     bounds: List[tuple[float, float]],
-    mu: np.ndarray | None = None,
-    target_return: float | None = None,
+    mu: np.ndarray,
+    target_volatility: float,
+    x0: np.ndarray | None = None,
 ) -> np.ndarray | None:
     """
-    Solve: minimize w^T Cov w
-           subject to sum(w)=1 and optionally w·mu = target_return.
+    Maximize expected return subject to achieving the specified volatility level:
+        maximize w·mu
+        subject to sum(w) = 1
+                  w^T Cov w = target_volatility^2
     """
-    n = cov.shape[0]
-    cons = [{"type": "eq", "fun": lambda w: np.sum(w) - 1.0}]
-    if mu is not None and target_return is not None:
-        cons.append({"type": "eq", "fun": lambda w, tr=target_return: w @ mu - tr})
-    x0 = _initial_weights(bounds)
-    res = minimize(lambda w: w @ cov @ w, x0, bounds=bounds, constraints=cons)
+    target_volatility = float(target_volatility)
+    if target_volatility < 0:
+        raise ValueError("target_volatility must be non-negative.")
+    target_variance = target_volatility**2
+    cons = [
+        {"type": "eq", "fun": lambda w: np.sum(w) - 1.0},
+        {
+            "type": "eq",
+            "fun": lambda w, tv=target_variance: w @ cov @ w - tv,
+        },
+    ]
+    start = x0 if x0 is not None else _initial_weights(bounds)
+    res = minimize(lambda w, mu=mu: -(w @ mu), start, bounds=bounds, constraints=cons)
     if not res.success:
         return None
     return res.x
@@ -110,36 +154,63 @@ def build_constrained_frontier(
     n_portfolios: int = 50,
 ) -> list[FrontierPortfolio]:
     """
-    Construct a constrained efficient frontier that honors per-asset bounds and
-    optional volatility caps. Returns a list of FrontierPortfolio entries.
+    Construct a constrained efficient frontier by sweeping from the minimum
+    achievable volatility to the maximum admissible volatility (defined by the
+    constraints) and, at each step, maximizing expected return subject to that
+    volatility level.
     """
     if n_portfolios < 2:
         raise ValueError("n_portfolios must be >= 2.")
 
     mu, cov, _ = mean_cov_annual(returns_m)
     n_assets = len(mu)
+
+    
     bounds = constraints.expand_bounds(n_assets)
 
-    w_gmv = _solve_portfolio(cov, bounds)
+    w_gmv = _solve_min_variance_portfolio(cov, bounds)
     if w_gmv is None:
         raise RuntimeError("Failed to solve for the global minimum-variance portfolio.")
 
-    ret_min = float(w_gmv @ mu)
-    ret_max = float(np.max(mu))
-    if np.isclose(ret_min, ret_max):
-        targets = np.array([ret_min] * n_portfolios, dtype=float)
+    w_max_vol = _solve_max_variance_portfolio(cov, bounds)
+    if w_max_vol is None:
+        raise RuntimeError("Failed to solve for the maximum-volatility portfolio.")
+
+    vol_min = float(np.sqrt(max(w_gmv @ cov @ w_gmv, 0.0)))
+    vol_max = float(np.sqrt(max(w_max_vol @ cov @ w_max_vol, 0.0)))
+
+    if constraints.max_volatility is not None:
+        admissible_cap = float(constraints.max_volatility)
+        if admissible_cap < 0:
+            raise ValueError("constraints.max_volatility must be non-negative.")
+        vol_cap = min(vol_max, admissible_cap)
     else:
-        targets = np.linspace(ret_min, ret_max, n_portfolios)
+        vol_cap = vol_max
+
+    if vol_cap < vol_min:
+        raise RuntimeError(
+            "Maximum admissible volatility is lower than the minimum achievable volatility."
+        )
+
+    target_vols = np.linspace(vol_min, vol_cap, n_portfolios)
 
     frontier: list[FrontierPortfolio] = []
-    for target in targets:
-        w = _solve_portfolio(cov, bounds, mu=mu, target_return=target)
+    prev_weights = w_gmv
+    for target_vol in target_vols:
+        w = _solve_portfolio(
+            cov,
+            bounds,
+            mu=mu,
+            target_volatility=target_vol,
+            x0=prev_weights,
+        )
         if w is None:
-            continue
+            raise RuntimeError(
+                f"Failed to solve for target volatility {target_vol:.6f}. Try relaxing constraints."
+            )
+        prev_weights = w
         ret = float(w @ mu)
         vol = float(np.sqrt(max(w @ cov @ w, 0.0)))
-        if constraints.max_volatility is not None and vol > constraints.max_volatility:
-            continue
         frontier.append(
             FrontierPortfolio(weights=w.astype(float), expected_return=ret, volatility=vol)
         )

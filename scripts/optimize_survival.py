@@ -33,14 +33,13 @@ from portfolio_tester.viz.charts import (
     plot_frontier_transition_map,
     plot_correlation_matrix,
     plot_returns_risk_table,
-    plot_survival_vs_vol
+    plot_survival_vs_vol,
+    plot_constrained_frontier
 )
+ 
+#in questo momento l'ottiizzatore restituisci il portafoglio conil survival rate più alto -> probabilità di successo goal più alta
 
-
-
-
-
-def main():
+def main(): 
     figs_dir = Path("figures") / "survival_optimizer"
     figs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -70,11 +69,11 @@ def main():
     rets_m, infl_m, rf_m = prep_returns_and_macro(prices_m)
     sampler = ReturnSampler(rets_m, infl_m)
 
-    # Optimization settings
+    # Optimization settings 
     constraints = OptimizationConstraints(
         min_weights=[0.05, 0.05, 0.05, 0.0, 0.0],
         max_weights=[0.55, 0.55, 0.40, 0.25, 0.25],
-        allow_short=False,
+        allow_short=False, #annual volatility constrins can be added
     )
     frontier = build_constrained_frontier(rets_m, constraints, n_portfolios=10)
     compute_survival_on_frontier(
@@ -83,7 +82,7 @@ def main():
         sampler=sampler,
         goals=goals,
         sampler_config=sampler_cfg,
-        n_sims_per_portfolio=100,
+        n_sims_per_portfolio=10,
     )
     result = find_best_survival_portfolio(frontier, smoothing_window=5)
     refine_best_portfolio(
@@ -160,10 +159,16 @@ def main():
         risks=np.array([fp.volatility for fp in result.frontier]),
         asset_labels=asset_labels,
         port_risk=best_vol,
-        msr_risk=v_msr,
+        #msr_risk=v_msr,
         title=f"Constrained Frontier Transition Map ({rets_m.index[0]:%b %Y} - {rets_m.index[-1]:%b %Y})",
     )
     fig.savefig(figs_dir / "constrained_transition.png", bbox_inches="tight"); plt.close(fig)
+
+    fig, ax = plot_constrained_frontier(
+        frontier=result.frontier,
+        best_idx=result.best_index,
+    )
+    fig.savefig(figs_dir / "constrained_efficient_frontier.png", bbox_inches="tight"); plt.close(fig)
 
     fig, ax = plot_survival_vs_vol(
         frontier=result.frontier,
