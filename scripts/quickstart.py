@@ -81,7 +81,8 @@ def main():
     print(f"CAGR median: {np.nanmedian(cagr_vals):.2%}")
     print(f"TWRR median: {np.nanmedian(twrr_vals):.2%}")
     #print(f"Sharpe (median): {np.nanmedian(sharpe_vals):.2f} | Sortino (median): {np.nanmedian(sortino_vals):.2f}")
-    print(f"Max Drawdown median: {np.median(mdd_including):.1%}")
+    print(f"Max Drawdown (incl cashflows) median: {np.median(mdd_including):.1%}")
+    print(f"Max Drawdown (excl cashflows) median: {np.median(mdd_excluding):.1%}")
     print("Percentiles (10/50/90) - End Balance:",
           [f"${v:,.0f}" for v in np.percentile(out['balances'][:,-1], [10,50,90])])
 

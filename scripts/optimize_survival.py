@@ -133,6 +133,7 @@ def main():
     print(f"CAGR median: {np.nanmedian(cagr_vals):.2%}")
     print(f"TWRR median: {np.nanmedian(twrr_vals):.2%}")
     print(f"Max Drawdown (incl cashflows) median: {np.median(mdd_including):.1%}")
+    print(f"Max Drawdown (excl cashflows) median: {np.median(mdd_excluding):.1%}")
 
     # --- Visualization outputs ---
     labels = asset_labels

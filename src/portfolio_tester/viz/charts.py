@@ -124,7 +124,7 @@ def plot_frontier_transition_map(
     # 6) optional vertical lines + tiny labels above the stack
     if port_risk is not None:
         ax.axvline(port_risk, color="k", linestyle="--", linewidth=1.5, alpha=0.9)
-        ax.annotate("Provided Portfolio", xy=(port_risk, 75),
+        ax.annotate("Selected Portfolio", xy=(port_risk, 75),
                     xytext=(0, 6), textcoords="offset points",
                     ha="center", va="bottom")
 
